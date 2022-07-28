@@ -1,5 +1,5 @@
 import os
-from flask import Flask, request, jsonify, abort
+from flask import Flask, request, jsonify, abort, redirect, url_for
 from sqlalchemy import exc
 import json
 from flask_cors import CORS
@@ -16,6 +16,10 @@ def create_app():
 
     db_drop_and_create_all()
 
+    @app.route('/')
+    def index():
+        return redirect(url_for('get_drinks'))
+
     @app.route('/drinks', methods = ['GET'])
     def get_drinks():
         """ Get all drinks """
@@ -24,75 +28,120 @@ def create_app():
         return jsonify({
             'success':True,
             'drinks': formatted_drinks
-        })
+
+        }), 200
 
    
     @app.route('/drinks-detail', methods = ['GET'])
-    def get_drinks_detail():
+    @requires_auth('get:drinks-detail')
+    def get_drinks_detail(auth):
         """ Get drinks details """
         drinks = Drink.query.all()
         formatted_drinks = [drink.long() for drink in drinks]
         return jsonify({
             'success': True,
             'drinks': formatted_drinks
-        })
+        }), 200
 
 
     @app.route('/drinks', methods = ['POST'])
-    def post_drinks():
+    @requires_auth('post:drinks')
+    def post_drinks(auth):
         request_body = request.get_json()
+
+        """ Get parameters"""
+        if 'title' and 'recipe' not in request_body:
+            abort(422)
+
+        recipe = request_body['recipe']
+        if isinstance(recipe, dict):
+            recipe = [recipe]
+
+        
         """ Add a new drink """
-        drink = Drink(title = request_body.get('title'), recipe = request_body.get('recipe'))
         try:
+            title = request_body['title']
+            
+            recipe_json = json.dumps(recipe)
+
+            drink = Drink(title = title, recipe = recipe_json)
+
             drink.insert()
+
             result = [drink.long()]
-            return jsonify({
+        except():
+            abort(400)
+        return jsonify({
                 'success': True,
                 'drinks':result
-            })
-        except():
-            abort(500)
+            }), 200
 
 
     @app.route('/drinks/<int:id>', methods = ['PATCH'])
-    def updateDrink(id):
+    @requires_auth('patch:drinks')
+    def updateDrink(auth, id):
         """ Get specified drink"""
+
         drink = Drink.query.filter(Drink.id == id).one_or_none()
+
         if drink is None:
             """Drink does not exist in database """
             abort(404)
+
         request_body = request.get_json()
-        drink.title = request_body.get('title')
-        drink.recipe = request_body.get('recipe')
+        
         try:
+            title = request_body.get('title')
+            recipe = request_body.get('recipe')
+            
             """ Update the drink """
+            if title:
+                drink.title = title
+
+            if recipe:
+                drink.recipe = json.dumps(recipe)
+            
             drink.update()
             result = [drink.long()]
-            return jsonify({
+        except():
+            abort(400)
+        return jsonify({
                 'success':True,
                 'drinks':result
-            })
-        except():
-            abort(500)
+            }), 200
 
  
     @app.route('/drinks/<int:id>', methods = ['DELETE'])
-    def delete_drink(id):
+    @requires_auth('delete:drinks')
+    def delete_drink(auth, id):
         """ Get specified drink """
         drink = Drink.query.filter(Drink.id == id).one_or_none()
+
         if drink is None:
             """ Specified drink not found """
-            abort(404)
+            return({
+                'success': False,
+                'drinks': 'Drink with ID {} does not exist'.format(id)
+            }), 404
+            
         try:
             """ Delete spsecified drink"""
             drink.delete()
-            result = [drink.long()]
-            return jsonify({
-                'success':True,
-                'drinks':result
-            })
+           
         except():
             abort(500)
+
+        return jsonify({
+                'success':True,
+                'drinks': id
+            })
+
+    """ Tests Auth0 Login """
+    @app.route('/login-response', methods=['GET'])
+    def auth0_result():
+        return jsonify({
+            'message': 'login successful'
+        })
     
     """ Error Handlers"""
 
@@ -108,7 +157,7 @@ def create_app():
     @app.errorhandler(404)
     def resourceNotFound(error):
             return jsonify({
-                "sucess": False,
+                "success": False,
                 "error": 404,
                 "message": "Resource not found"
             }), 404
