@@ -180,4 +180,12 @@ def create_app():
                 "message": "Method not allowed"
             }), 405
 
+    @app.errorhandler(AuthError)
+    def auth_error(error):
+        return jsonify({
+            'success': False,
+            'error': error.error,
+            'message': error.status_code,
+        }), error.status_code
+
     return app
